@@ -10,7 +10,9 @@ from PIL import Image, ImageDraw
 Image.MAX_IMAGE_PIXELS = None
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import map_source as ms
+# map_source.py is gone; map_layout.py replaced it and keeps the same two names this
+# file needs, so the import is the only thing that had to change.
+import map_layout as ms
 
 def main():
     print("=== DEM 3D Viewer Asset Generator ===")
@@ -82,8 +84,6 @@ def main():
     # 2.5. Parse OSM way coordinates to build polygon mask for texture coloring
     osm_candidates = [
         os.path.join(project_root, "osm_generator", "map.osm"),
-        os.path.join(project_root, "osm_generator", "outputs", "zoning_map manual.osm"),
-        os.path.join(project_root, "osm_generator", "outputs", "zoning_map.osm"),
         os.path.join(current_dir, "map.osm"),
     ]
     osm_path = next((p for p in osm_candidates if os.path.exists(p)), None)

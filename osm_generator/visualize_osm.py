@@ -78,8 +78,8 @@ def main():
                                          edgecolor=colour, alpha=0.55, linewidth=1.2))
             cx = sum(xs) / len(xs)
             cy = sum(ys) / len(ys)
-            ax.text(cx, cy, 'VILLAGE' if village else name.split(' (')[0].replace(
-                'Industry Pad ', 'IND '), color='white', fontsize=6,
+            ax.text(cx, cy, name.split(' (')[0].replace('Industry Pad ', 'IND ')
+                .replace('Village ', ''), color='white', fontsize=6,
                 fontweight='bold', ha='center', va='center', zorder=8)
             counts['farmyard'] += 1
         elif tags.get('landuse') == 'farmland':

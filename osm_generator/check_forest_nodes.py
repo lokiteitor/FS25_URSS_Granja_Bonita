@@ -28,6 +28,8 @@ def main():
     groups = {'farmland': [], 'wood': [], 'farmyard': [], 'water': []}
     roads = Counter()
     road_km = Counter()
+    rails = Counter()
+    rail_km = Counter()
     bridges = 0
 
     for way in root.findall('way'):
@@ -42,6 +44,15 @@ def main():
             kind = tags['highway']
             roads[kind] += 1
             road_km[kind] += ms.polyline_length(coords) / 1000.0
+            if tags.get('bridge') == 'yes':
+                bridges += 1
+            continue
+
+        # A way tagged only railway=* matches none of the tests below and would vanish
+        # from this inventory entirely, so it is counted here.
+        if 'railway' in tags:
+            rails[tags['railway']] += 1
+            rail_km[tags['railway']] += ms.polyline_length(coords) / 1000.0
             if tags.get('bridge') == 'yes':
                 bridges += 1
             continue
@@ -73,6 +84,11 @@ def main():
               f"max {areas[-1]:.1f}")
         for name, area, npts in sorted(items, key=lambda z: -z[1])[:5]:
             print(f"   {area:7.1f} ha  {npts:4d} nodes  {name}")
+
+    if rails:
+        print(f"\nrailway: {sum(rails.values())} ways, {sum(rail_km.values()):.1f} km")
+        for kind in sorted(rails, key=lambda k: -rail_km[k]):
+            print(f"   {kind:<12} {rails[kind]:3d} ways  {rail_km[kind]:6.2f} km")
 
     print(f"\nroads: {sum(roads.values())} ways, "
           f"{sum(road_km.values()):.1f} km, {bridges} bridge(s)")
