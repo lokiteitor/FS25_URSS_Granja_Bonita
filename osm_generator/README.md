@@ -72,6 +72,11 @@ Two rules everything else depends on:
   and emitting the smoothed one leaves the two a metre apart - close enough to look
   joined, far enough not to be. The same trap is why the level crossing is woven back in
   after the Douglas-Peucker pass, which would otherwise drop it from both lines.
+* **At most `parcels.MAX_FIELDS` fields.** A kolkhoz is a few large blocks, not a
+  patchwork, so the count is a ceiling `verify` enforces rather than whatever the strips
+  happen to produce. `TYPICAL_HA` is the lever: a band is cut into
+  `round(band_ha / target)` parcels, so raising the target merges neighbours into wider
+  fields.
 * **No field is farmed on the bank.** The floodplain is `map_layout.FLOODPLAIN_HALF_M`
   out from the axis - the same terrace the DEM builds flat - and the gallery forest
   covers it. Parcels are not rejected for reaching it, they are *trimmed* to it: the

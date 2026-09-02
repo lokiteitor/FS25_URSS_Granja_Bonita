@@ -517,6 +517,8 @@ def verify(path, L, cross_id):
                 break
 
     network_checks(read, L, fails)
+    if counts.get('farmland', 0) > pc.MAX_FIELDS:
+        fails.append(f"{counts['farmland']} fields, over the {pc.MAX_FIELDS} ceiling")
     if cross_uses != {'primary', 'rail'}:
         fails.append(f"the level crossing node is used by {sorted(cross_uses)}, "
                      "not by the primary road and the railway")

@@ -34,11 +34,17 @@ import map_geom as mg
 
 # --- field sizing (mixed kolkhoz) --------------------------------------------------
 MIN_FIELD_HA, MAX_FIELD_HA = 4.0, 102.0
-SMALL_HA = (4.0, 10.0)          # inside a village halo
-TYPICAL_HA = (15.0, 35.0)       # the default block - the median lands here
+SMALL_HA = (7.0, 16.0)          # inside a village halo
+TYPICAL_HA = (22.0, 46.0)       # the block a band is cut towards. The median comes out
+                                # a little under it: carving trims parcels back, and a
+                                # band rarely divides into a whole number of them
 BIG_HA = (85.0, 102.0)          # the plateau blocks
 VILLAGE_HALO_M = 700.0
 MAX_BIG_FIELDS = 10
+MAX_FIELDS = 150                # ceiling on the field count. Fewer, larger blocks is a
+                                # kolkhoz; it is also the size the cut targets are set
+                                # from, so raising one without lowering the other breaks
+                                # the check in generate_osm.verify
 BIG_RIVER_CLEAR_M = 900.0
 BIG_ASPECT = (1.2, 2.6)         # Ukrainian mega-fields are wide, not square
 BIG_MAX_W_M, BIG_MAX_H_M = 1500.0, 1000.0
