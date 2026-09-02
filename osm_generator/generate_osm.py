@@ -65,6 +65,9 @@ TRACK_JOIN_M = 45.0            # how close a track must come to count as joined.
                                # road *corridor*, not at the road, so the nearest a
                                # candidate can get is the corridor half-width
 STUB_MIN_M = 200.0
+NECK_MIN_M = 20.0              # least a field may pinch to between two scan lines. Under
+                               # parcels.CARVE_MIN_OVERLAP_M, which is what the cutter
+                               # enforces, so the Douglas-Peucker pass has room to wobble
 LEAF_TYPES = ("broadleaved", "broadleaved", "mixed")
 
 
@@ -579,6 +582,10 @@ def verify(path, L, cross_id):
             if key == 'farmland' and not (pc.MIN_FIELD_HA - 0.5 <= ha
                                           <= pc.MAX_FIELD_HA + 0.5):
                 fails.append(f"{name} is {ha:.1f} ha")
+            if key == 'farmland':
+                ov = narrowest_neck(coords)
+                if ov is not None and ov < NECK_MIN_M:
+                    fails.append(f"{name} is wrung: {ov:.0f} m across its neck")
             if name.startswith('Industry Pad'):
                 if ha > ml.INDUSTRY_MAX_HA:
                     fails.append(f"{name} is {ha:.2f} ha, over the 5 ha limit")
@@ -616,6 +623,34 @@ def verify(path, L, cross_id):
     if fails:
         print(f"   !  {len(fails)} check(s) failed")
     return not fails
+
+
+def narrowest_neck(ring, step=25.0):
+    """Least overlap between the vertical extents of two neighbouring scan lines.
+
+    A field is y-monotone in x, so a vertical line meets it in one interval and the
+    parcel is a band sweeping west to east. Where two neighbouring intervals barely
+    overlap - or do not overlap at all, which comes back negative - the polygon is not a
+    band any more but two lobes wrung together through a pinch, which is what a road
+    crossing a strip on the diagonal used to produce.
+    """
+    xs = [p[0] for p in ring]
+    x0, x1 = min(xs), max(xs)
+    n = max(2, int((x1 - x0) / step))
+    prev, worst = None, None
+    for k in range(1, n):
+        x = x0 + (x1 - x0) * k / n
+        ys = [a[1] + (x - a[0]) / (b[0] - a[0]) * (b[1] - a[1])
+              for a, b in zip(ring, ring[1:])
+              if abs(b[0] - a[0]) > 1e-9 and (a[0] - x) * (b[0] - x) <= 0]
+        if not ys:
+            continue
+        cur = (min(ys), max(ys))
+        if prev is not None:
+            ov = min(prev[1], cur[1]) - max(prev[0], cur[0])
+            worst = ov if worst is None else min(worst, ov)
+        prev = cur
+    return worst
 
 
 def network_checks(read, L, fails):

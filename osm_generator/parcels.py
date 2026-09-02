@@ -58,6 +58,10 @@ FIELD_FILL_M = 2.0              # margin a finished parcel claims. Small on purp
 WIDE_CUT_M = 28.0               # every third cut in a band, so cross belts fit too
 WIDE_CUT_EVERY = 3
 CARVE_STEP_M = 24.0
+CARVE_MIN_OVERLAP_M = MIN_FIELD_WIDTH_M   # two neighbouring columns belong to the same
+                                # parcel only if their free runs overlap by a workable
+                                # width. Below that the "parcel" is two fields joined by
+                                # a neck no machine can turn in - see carve_parcel
 FIELD_SIMPLIFY_M = 6.0
 SIMPLIFY_SLACK_M = 12.0         # every mask a parcel is cut against is grown by this
                                 # first: the Douglas-Peucker pass that follows can pull
@@ -520,14 +524,23 @@ def place_big_fields(occ, rng, river_centre, n_max=MAX_BIG_FIELDS):
 
 
 def carve_parcel(x0, x1, y0, y1, occ, step=CARVE_STEP_M):
-    """Trim a rectangle to the ground that is actually free, one column at a time.
+    """Trim a rectangle to the ground that is actually free -> a list of rings.
 
     Columns are walked west to east and each contributes its longest free y-run inside
-    [y0, y1]. The ring is then the north edge west to east, down the east side, and the
+    [y0, y1]. A ring is then the north edge west to east, down the east side, and the
     south edge east to west. Because it is built from one interval per column it is
     y-monotone in x by construction: it cannot self-intersect, cannot enclose a hole and
     cannot split into two components - all three of which are ordinary outcomes of
     subtracting polygons, which is why that is not what happens here.
+
+    What being y-monotone does *not* rule out is the parcel getting wrung out. Where a
+    road crosses the strip on the diagonal it splits every column it touches in two, and
+    the longest of the two halves is below the road on one side of it and above the road
+    on the other. The ring that results is a legal simple polygon and a nonsense field:
+    two lobes wrung together through a neck at the crossing. So the columns are cut into
+    groups wherever consecutive free runs stop overlapping by a workable width, and each
+    group becomes a field of its own - which is what the ground actually looks like: two
+    fields, one either side of the road.
 
     A parcel whose columns all come back with the full [y0, y1] simplifies straight back
     to four corners, so most fields stay clean rectangles and only the ones the river or
@@ -536,29 +549,39 @@ def carve_parcel(x0, x1, y0, y1, occ, step=CARVE_STEP_M):
     xs = list(np.arange(x0, x1 + 1e-6, step))
     if xs[-1] < x1 - 1e-6:
         xs.append(x1)
-    top, bot = [], []
+    groups, cur = [], []
     for x in xs:
         r = occ.free_run_y(min(x, x1 - 0.01), y0, y1)
         if r is None or (r[1] - r[0]) < MIN_FIELD_WIDTH_M:
-            if not top:
-                continue
-            break
-        top.append((x, max(r[0], y0)))
-        bot.append((x, min(r[1], y1)))
-    if len(top) < 2:
-        return None
-    if top[-1][0] - top[0][0] < MIN_FIELD_WIDTH_M:
-        return None
-    ring = top + bot[::-1]
-    ring.append(ring[0])
-    ring = mg.simplify(ring, FIELD_SIMPLIFY_M)
-    if len(ring) < 4:
-        return None
-    if ring[0] != ring[-1]:
+            if cur:
+                groups.append(cur)
+                cur = []
+            continue
+        col = (x, max(r[0], y0), min(r[1], y1))
+        if cur:
+            _, pa, pb = cur[-1]
+            if min(pb, col[2]) - max(pa, col[1]) < CARVE_MIN_OVERLAP_M:
+                groups.append(cur)
+                cur = []
+        cur.append(col)
+    if cur:
+        groups.append(cur)
+
+    out = []
+    for g in groups:
+        if len(g) < 2 or g[-1][0] - g[0][0] < MIN_FIELD_WIDTH_M:
+            continue
+        ring = ([(x, a) for x, a, _ in g]
+                + [(x, b) for x, _, b in reversed(g)])
         ring.append(ring[0])
-    if not mg.ring_is_simple(ring):
-        return None
-    return ring
+        ring = mg.simplify(ring, FIELD_SIMPLIFY_M)
+        if len(ring) < 4:
+            continue
+        if ring[0] != ring[-1]:
+            ring.append(ring[0])
+        if mg.ring_is_simple(ring):
+            out.append(ring)
+    return out
 
 
 def _class_range(cx, cy, villages):
@@ -617,17 +640,15 @@ def cut_fields(occ, rng, villages):
                     px0, px1 = cuts[c], min(cuts[c + 1], xb)
                     if px1 - px0 < MIN_FIELD_WIDTH_M:
                         continue
-                    ring = carve_parcel(px0, px1, a, b, occ)
-                    if ring is None:
-                        continue
-                    ha = mg.ring_area(ring) / 1e4
-                    per = ml.polyline_length(ring)
-                    if ha < MIN_FIELD_HA or ha > MAX_FIELD_HA:
-                        continue
-                    if per <= 0 or 2.0 * ha * 1e4 / per < MIN_FIELD_WIDTH_M:
-                        continue
-                    occ.fill_ring(ring, FIELD_FILL_M)
-                    fields.append((ring, ha, si))
+                    for ring in carve_parcel(px0, px1, a, b, occ):
+                        ha = mg.ring_area(ring) / 1e4
+                        per = ml.polyline_length(ring)
+                        if ha < MIN_FIELD_HA or ha > MAX_FIELD_HA:
+                            continue
+                        if per <= 0 or 2.0 * ha * 1e4 / per < MIN_FIELD_WIDTH_M:
+                            continue
+                        occ.fill_ring(ring, FIELD_FILL_M)
+                        fields.append((ring, ha, si))
                     if c + 1 < k:
                         g = widths_c[c]
                         gaps.append({"axis": "y", "at": px1 + g / 2.0, "half": g / 2.0,
