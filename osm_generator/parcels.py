@@ -89,8 +89,11 @@ RIPARIAN_MIN_W_M = 20.0
 RIPARIAN_WAVE_M = 700.0
 BELT_HALF_M = 11.0              # a 22 m shelterbelt: five to seven rows of poplar
 BELT_MIN_L_M = 400.0
-BELT_P = 0.6
+BELT_P = 0.75
 RAIL_BELT_OFF_M, RAIL_BELT_HALF_M = 30.0, 10.0
+WOOD_NOTCH_M = 96.            # firebreak cut to a platform the wood closed around.
+                                # Generous on purpose: the chaikin-and-simplify pass
+                                # that follows rounds a narrow bay straight back shut
 
 
 # ===================================================================== the occupancy
@@ -108,7 +111,11 @@ class Occupancy:
 
     CELL_M = 4.0
 
-    def __init__(self, size_m=ml.PLAYABLE_M):
+    def __init__(self, size_m=ml.PLAYABLE_M, cell_m=None):
+        # The cell size is an instance attribute so a coarser copy can be built for a
+        # different question: the road router asks about whole corridors, not field
+        # edges, and a 4 m grid there is 36x the cells for no extra answer.
+        self.CELL_M = float(cell_m) if cell_m else type(self).CELL_M
         self.size_m = float(size_m)
         self.n = int(round(size_m / self.CELL_M))
         self._img = Image.new("1", (self.n, self.n), 0)
@@ -326,6 +333,35 @@ def _slope_raster(n, cell_m):
     return np.hypot(gx, gy)
 
 
+def _break_enclosures(mask, pads, cell):
+    """Cut a firebreak out to open ground from any platform the wood has closed around.
+
+    `_trace_rings` returns outer boundaries and nothing else, so a wood that happens to
+    surround a yard swallows it whole: the ring comes back with the platform inside it,
+    and the editor would paint a forest over a flat industrial pad with a road running
+    to it. A yard is swallowed exactly when the open ground it stands on cannot be
+    walked to the edge of the map, which is a labelling question, and one notch to the
+    nearest ground that can turns the enclosure into a bay the boundary walks round.
+    """
+    lbl, _ = ndimage.label(~mask)
+    edge = set(lbl[0, :]) | set(lbl[-1, :]) | set(lbl[:, 0]) | set(lbl[:, -1])
+    edge.discard(0)
+    if not edge:
+        return mask
+    outside = np.isin(lbl, list(edge))
+    _, idx = ndimage.distance_transform_edt(~outside, return_indices=True)
+    img = Image.fromarray(mask.astype(np.uint8), mode="L")
+    dr = ImageDraw.Draw(img)
+    n = mask.shape[0]
+    for p in pads:
+        j, i = int(p["cx"] / cell), int(p["cy"] / cell)
+        if not (0 <= i < n and 0 <= j < n) or outside[i, j]:
+            continue
+        dr.line([(j, i), (int(idx[1][i, j]), int(idx[0][i, j]))], fill=0,
+                width=max(2, int(round(WOOD_NOTCH_M / cell))))
+    return np.array(img) > 0
+
+
 def structural_woods(L, keepout, rng):
     """The gallery forest along the river and the blocks on the valley sides.
 
@@ -386,7 +422,12 @@ def structural_woods(L, keepout, rng):
     thr = float(np.quantile(cand, 1.0 - WOOD_TARGET_FRAC)) if cand.size else 1e9
     blocks = (score >= thr)
 
-    mask = _regularise((riparian | blocks) & keep, cell)
+    # `& keep` again after regularising, not just before: closing bridges a notch and
+    # `binary_fill_holes` fills a hole, and a platform punched out of the wood is
+    # exactly a hole. Without this the forest closes back over the industry pads it was
+    # told to leave alone, and no amount of firebreak afterwards can reopen them.
+    mask = _break_enclosures(_regularise((riparian | blocks) & keep, cell) & keep,
+                             L["pads"], cell)
     rings = []
     for ring in _trace_rings(mask, cell, min_cells=int(MIN_WOOD_HA * 1e4 / cell / cell)):
         ring = mg.simplify(mg.chaikin(ring, 2, closed=True), WOOD_SIMPLIFY_M)

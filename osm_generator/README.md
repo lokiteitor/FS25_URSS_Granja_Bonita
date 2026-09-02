@@ -4,12 +4,13 @@
 
 - `generate_osm.py`       the pipeline and the writer
 - `parcels.py`            the field cutter and the wood shaper
+- `roads.py`              the router that links every yard to the main road
 - `map_extent.py`         centre, size and projection - the one source of truth for *where*
 - `visualize_osm.py`      render map.osm to map_osm_visual.png
 - `check_forest_nodes.py` feature inventory (counts, areas, road and rail network)
 
 ```
-python3 generate_osm.py        # -> map.osm, ~2200 nodes, ~320 ways
+python3 generate_osm.py        # -> map.osm, ~2300 nodes, ~335 ways
 python3 check_forest_nodes.py
 python3 visualize_osm.py       # -> map_osm_visual.png
 ```
@@ -18,7 +19,7 @@ Everything structural - river, lake, road, railway, the thirty platforms - is re
 `../map_layout.py`, which the DEM generator reads too. This half adds the countryside on
 top: woodland, fields, link roads, farm tracks and shelterbelts.
 
-`generate_osm.py` and `parcels.py` use numpy, scipy and Pillow. The two reader scripts
+`generate_osm.py`, `parcels.py` and `roads.py` use numpy, scipy and Pillow. The two reader scripts
 and `map_extent.py` are standard library plus matplotlib for the render.
 
 ## Map centre
@@ -70,11 +71,23 @@ Two rules everything else depends on:
   and emitting the smoothed one leaves the two a metre apart - close enough to look
   joined, far enough not to be. The same trap is why the level crossing is woven back in
   after the Douglas-Peucker pass, which would otherwise drop it from both lines.
+* **Every yard reaches the main road, and no road drives through a yard.** `roads.py`
+  floods a cost grid outwards from the road network - platforms, river and lake
+  impassable, railway merely expensive - and attaches the farms and the industry
+  platforms one at a time, cheapest first, each accepted link becoming free ground for
+  the next. So the links grow as one tree rooted on the main road, and reachability is a
+  property of the construction rather than something to hope for. `verify` re-reads the
+  written file and checks both promises with a union-find on the node ids: a link that
+  merely ends *on* a road segment without carrying its coordinate shows up here as a
+  separate component.
 
 ## Reference
 
 `generate_osm_bocage.py` is the previous English bocage generator, centred on
 52.0620, -1.3400. It is not part of the build - it needs the long-gone `map_source.py` -
 and it is kept because several of its routines were ported from it: the node and way
-pools, `write_osm`, `connect_road_crossings`, `weave`, `point_in_ring`, `connect_pads`
-and the raster morphology that regularises a wood outline.
+pools, `write_osm`, `connect_road_crossings`, `weave`, `point_in_ring` and the raster
+morphology that regularises a wood outline. Its `connect_pads` - aim each yard at the
+nearest point of whatever network exists - is the one routine deliberately *not* ported:
+on this layout it left twenty-one of the twenty-seven yards on spur trees that never
+reached the road.

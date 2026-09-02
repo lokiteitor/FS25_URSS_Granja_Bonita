@@ -32,6 +32,9 @@ here depends on them:
   * Smooth first, weave second, emit third. Aiming a spur at an unsmoothed centreline
     and then emitting the smoothed one leaves the two a metre apart: close enough to
     look joined, far enough not to be.
+  * Every yard reaches the main road, and no road drives through a yard. That is
+    `roads.py`, and `verify` measures both on the written file rather than trusting the
+    intention behind them.
 """
 import math
 import os
@@ -46,15 +49,17 @@ import map_layout as ml
 import map_geom as mg
 import map_extent as mx
 import parcels as pc
+import roads as rd
 
 OUT_NAME = "map.osm"
 SEED = ml.SEED
 
 # --- link roads ---------------------------------------------------------------------
-PAD_LINK_MAX_M = 1200.0
-ESTATE_OFF_M = 60.0
-STREET_INSET_FRAC = 0.30
 TRACK_MIN_L_M = 320.0
+TRACK_P = 0.65                 # share of the free headland corridors a track may claim.
+                               # The rest are left for the shelterbelts: tracks and belts
+                               # want the same ground, and a track pass that takes every
+                               # corridor it can reach leaves the map with no belts at all
 TRACK_JOIN_M = 45.0            # how close a track must come to count as joined. Wider
                                # than it looks it should be: a free run stops at the
                                # road *corridor*, not at the road, so the nearest a
@@ -294,7 +299,7 @@ def stage_woods(add_way, woods, belts):
                        'name': f"Shelterbelt {i} ({ha:.1f} ha)"})
 
 
-def village_streets(add_way, L, road_pts):
+def village_streets(add_way, L):
     """A back lane and two or three cross streets inside each village.
 
     Far less machinery than the bocage's `village_streets`: the main road already runs
@@ -323,61 +328,7 @@ def village_streets(add_way, L, road_pts):
     return out
 
 
-def connect_pads(add_way, L, targets, kinds, tag_name):
-    """Access spurs. Port of the idea in generate_osm_bocage.py:613: aim at the nearest
-    point of the existing network, and push the far end a little way inside the yard so
-    the spur ends on the pad rather than at its fence."""
-    out = []
-    for p in L["pads"]:
-        if p["kind"] not in kinds:
-            continue
-        best = None
-        for t in targets:
-            d, pt, _, _ = mg.project_on_polyline((p["cx"], p["cy"]), t)
-            if best is None or d < best[0]:
-                best = (d, pt)
-        if best is None or best[0] > PAD_LINK_MAX_M:
-            continue
-        gate = mg.ray_hit((p["cx"], p["cy"]),
-                          (best[1][0] - p["cx"], best[1][1] - p["cy"]), p["ring"])
-        end = gate[0] if gate else (p["cx"], p["cy"])
-        end = mg.lerp(end, (p["cx"], p["cy"]), 0.25)
-        name = tag_name(p)
-        out.append(add_way([best[1], end], {'highway': 'secondary', 'name': name}))
-    return out
-
-
-def estate_roads(add_way, L):
-    """One road per siding row instead of eight separate spurs - which is why the
-    industry pads were laid out as an estate on the railway in the first place."""
-    sid = [p for p in L["pads"] if p.get("sub") == "siding"]
-    if not sid:
-        return []
-    rail = L["rail"]["centre"]
-    rows = {}
-    for p in sid:
-        d, pt, _, s_at = mg.project_on_polyline((p["cx"], p["cy"]), rail)
-        rows.setdefault(round(d / 200.0), []).append((s_at, p, d, pt))
-    out = []
-    for k, (key, items) in enumerate(sorted(rows.items())):
-        items.sort()
-        pts = []
-        for s_at, p, d, pt in items:
-            _, foot, _, _ = mg.project_on_polyline((p["cx"], p["cy"]), rail)
-            nx, ny = mg._unit(p["cx"] - foot[0], p["cy"] - foot[1])
-            off = d - p["h"] / 2.0 - ESTATE_OFF_M
-            pts.append((foot[0] + nx * off, foot[1] + ny * off))
-        if len(pts) < 2:
-            continue
-        out.append(add_way(pts, {'highway': 'secondary',
-                                 'name': f"Estate Road {chr(65 + k)}"}))
-        for (s_at, p, d, pt), q in zip(items, pts):
-            out.append(add_way([q, (p["cx"], p["cy"])],
-                               {'highway': 'tertiary', 'name': 'Estate Access'}))
-    return out
-
-
-def farm_tracks(add_way, gaps, occ, network, river_centre):
+def farm_tracks(add_way, get_node, rng, gaps, occ, network, river_centre):
     """Service tracks along the headlands the fields left.
 
     The headlands already *are* a rectilinear corridor grid, so no path search is
@@ -390,7 +341,7 @@ def farm_tracks(add_way, gaps, occ, network, river_centre):
     """
     cand = []
     for g in gaps:
-        if g["use"] is not None:
+        if g["use"] is not None or rng.random() >= TRACK_P:
             continue
         h = pc.TRACK_CLEAR_M
         if g["axis"] == "x":
@@ -410,35 +361,41 @@ def farm_tracks(add_way, gaps, occ, network, river_centre):
         changed = False
         for item in list(cand):
             g, c = item
-            reach = [n for n in network if touches(c, n)]
-            reach += [a for _, a in accepted if touches(c, a)]
+            reach = [w for w in network if touches(c, w['coords'])]
+            reach += [w for _, w in accepted if touches(c, w['coords'])]
             if not reach:
                 continue
-            # Snap the loose ends onto whatever they reached. A track that stops the
-            # corridor's half-width short of the road looks joined on the render and is
-            # not joined in the file, and that is the one mistake the whole node-sharing
-            # scheme exists to avoid.
-            c = [_snap(c[0], reach), _snap(c[-1], reach)]
-            accepted.append((g, c))
+            # Snap the loose ends onto whatever they reached, and weld the snapped point
+            # into that way. A track that stops the corridor's half-width short of the
+            # road looks joined on the render and is not joined in the file, and that is
+            # the one mistake the whole node-sharing scheme exists to avoid.
+            p0, w0 = _snap(c[0], reach)
+            p1, w1 = _snap(c[-1], reach)
             cand.remove(item)
             changed = True
-    accepted = [(g, c) for g, c in accepted
-                if ml.polyline_length(c) >= STUB_MIN_M]
-    for g, c in accepted:
-        add_way(c, {'highway': 'tertiary', 'name': 'Farm Track'})
-        occ.fill_polyline(c, pc.TRACK_CLEAR_M)
-        g["use"] = "track"
-    return len(accepted), sum(ml.polyline_length(c) for _, c in accepted)
+            if (w0 is None and w1 is None) or ml.polyline_length([p0, p1]) < STUB_MIN_M:
+                continue
+            way = add_way([p0, p1], {'highway': 'tertiary', 'name': 'Farm Track'})
+            for pt, tw in ((p0, w0), (p1, w1)):
+                if tw is not None:
+                    rd.weld(tw, pt, get_node)
+            occ.fill_polyline([p0, p1], pc.TRACK_CLEAR_M)
+            g["use"] = "track"
+            accepted.append((g, way))
+    return (len(accepted),
+            sum(ml.polyline_length(w['coords']) for _, w in accepted))
 
 
 def _snap(pt, reach):
-    """Pull an endpoint onto the nearest way it is close to, so the junction is real."""
+    """Pull an endpoint onto the nearest way it is close to -> (point, that way)."""
     best = None
-    for r in reach:
-        d, q, _, _ = mg.project_on_polyline(pt, r)
+    for w in reach:
+        d, q, _, _ = mg.project_on_polyline(pt, w['coords'])
         if best is None or d < best[0]:
-            best = (d, q)
-    return best[1] if best and best[0] <= TRACK_JOIN_M * 1.5 else pt
+            best = (d, q, w)
+    if best is None or best[0] > TRACK_JOIN_M * 1.5:
+        return pt, None
+    return best[1], best[2]
 
 
 # ============================================================================== main
@@ -506,19 +463,25 @@ def main():
           f"level crossing node {cross_id}")
 
     print("5. Link roads...")
-    road_inside = [w['coords'] for w in road_ways]
-    streets = village_streets(add_way, L, road_inside)
-    est = estate_roads(add_way, L)
-    targets = road_inside + [w['coords'] for w in streets] + [w['coords'] for w in est]
-    spurs = connect_pads(add_way, L, targets, ("farm",),
-                         lambda p: f"{p['name']} Road")
-    spurs += connect_pads(add_way, L, targets + [w['coords'] for w in spurs],
-                          ("industry",),
-                          lambda p: f"{p['name']} Access")
-    for w in streets + est + spurs:
+    streets = village_streets(add_way, L)
+    router = rd.Router(L, woods)
+    for w in road_ways:
+        # Not the bridge decks: a spur joining one mid-span has nothing to stand on.
+        if w['tags'].get('bridge') != 'yes':
+            router.add_source_way(w)
+    links, orphans = router.link_pads(
+        add_way, get_node,
+        [p for p in L["pads"] if p["kind"] in ("farm", "industry")],
+        lambda p: {'highway': 'secondary',
+                   'name': (f"{p['name']} Road" if p["kind"] == "farm"
+                            else f"{p['name']} Access")})
+    for w in streets + [w for _, w in links]:
         occ.fill_polyline(w['coords'], pc.SECONDARY_CLEAR_M + pc.SIMPLIFY_SLACK_M)
-    print(f"   {len(streets)} village street(s), {len(est)} estate way(s), "
-          f"{len(spurs)} access spur(s)")
+    link_km = sum(ml.polyline_length(w['coords']) for _, w in links) / 1000.0
+    print(f"   {len(streets)} village street(s), {len(links)} yard link(s), "
+          f"{link_km:.1f} km")
+    for p in orphans:
+        print(f"   !  {p['name']} could not be routed to the main road")
 
     print("6. Big plateau fields...")
     big = pc.place_big_fields(occ, rng, L["river"]["centre"])
@@ -540,8 +503,8 @@ def main():
           f"{sum(areas):.0f} ha farmed ({100*sum(areas)/played:.1f} %)")
 
     print("8. Farm tracks along the headlands...")
-    network = [w['coords'] for w in road_ways + streets + est + spurs]
-    n_tracks, track_km = farm_tracks(add_way, gaps, occ, network,
+    network = road_ways + streets + [w for _, w in links]
+    n_tracks, track_km = farm_tracks(add_way, get_node, rng, gaps, occ, network,
                                      L["river"]["centre"])
     print(f"   {n_tracks} track(s), {track_km/1000.0:.1f} km")
 
@@ -583,11 +546,12 @@ def verify(path, L, cross_id):
 
     fails = []
     counts, cross_uses = {}, set()
-    used = {}
+    used, read = {}, []
     for w in root.findall('way'):
         tags = {t.get('k'): t.get('v') for t in w.findall('tag')}
         refs = [int(nd.get('ref')) for nd in w.findall('nd')]
         coords = [nodes[r] for r in refs]
+        read.append({'tags': tags, 'refs': refs, 'coords': coords})
         for r in refs:
             used[r] = used.get(r, 0) + 1
         if cross_id in refs:
@@ -623,6 +587,21 @@ def verify(path, L, cross_id):
                 if abs(w_m - h_m) > 0.5:
                     fails.append(f"{name} is not square ({w_m:.1f} x {h_m:.1f} m)")
 
+    # A platform is punched out of the woodland mask, but the morphology that follows
+    # can close back over it, so the promise is checked on the file: no wood polygon may
+    # cover a yard.
+    woods = [w for w in read if w['tags'].get('natural') == 'wood']
+    for p in L['pads']:
+        px0, py0, px1, py1 = mg.ring_bbox(p['ring'])
+        for w in woods:
+            wx0, wy0, wx1, wy1 = mg.ring_bbox(w['coords'])
+            if wx1 < px0 or px1 < wx0 or wy1 < py0 or py1 < wy0:
+                continue
+            if any(mg.point_in_ring(c, w['coords']) for c in p['ring']):
+                fails.append(f"{w['tags'].get('name', 'a wood')} covers {p['name']}")
+                break
+
+    network_checks(read, L, fails)
     if cross_uses != {'primary', 'rail'}:
         fails.append(f"the level crossing node is used by {sorted(cross_uses)}, "
                      "not by the primary road and the railway")
@@ -637,6 +616,68 @@ def verify(path, L, cross_id):
     if fails:
         print(f"   !  {len(fails)} check(s) failed")
     return not fails
+
+
+def network_checks(read, L, fails):
+    """Reachability and trespass, measured on the file rather than on the intention.
+
+    The union-find runs on node ids, so it sees the joins that are actually in the XML:
+    a spur whose endpoint merely lies on a road segment is a separate component here,
+    which is precisely the failure it is meant to catch.
+    """
+    hw = [w for w in read if 'highway' in w['tags']]
+    par = {}
+
+    def find(a):
+        par.setdefault(a, a)
+        while par[a] != a:
+            par[a] = par[par[a]]
+            a = par[a]
+        return a
+
+    for w in hw:
+        for r in w['refs'][1:]:
+            ra, rb = find(w['refs'][0]), find(r)
+            if ra != rb:
+                par[ra] = rb
+
+    main = {find(w['refs'][0]) for w in hw if w['tags'].get('highway') == 'primary'}
+    if len(main) != 1:
+        fails.append(f"the main road is in {len(main)} piece(s) rather than one")
+    stranded = [w for w in hw if find(w['refs'][0]) not in main]
+    if stranded:
+        names = sorted({w['tags'].get('name', '?') for w in stranded})
+        fails.append(f"{len(stranded)} way(s) never reach the main road: "
+                     + ", ".join(names[:4]))
+
+    for p in L['pads']:
+        if p['kind'] == 'village':
+            continue
+        collar = mg.grow_ring(p['ring'], 3.0)
+        if not any(find(w['refs'][0]) in main
+                   and any(mg.point_in_ring(c, collar) for c in w['coords'])
+                   for w in hw):
+            fails.append(f"{p['name']} has no road connected to the main road")
+
+    # A yard is a place a road arrives at, not one it drives through. The village pads
+    # are the deliberate exception: the main road runs the length of them, and their own
+    # streets are inside them by definition.
+    for p in L['pads']:
+        inner = mg.grow_ring(p['ring'], -2.0)
+        x0, y0, x1, y1 = mg.ring_bbox(p['ring'])
+        for w in hw:
+            name = w['tags'].get('name', '')
+            if p['kind'] == 'village' and (name == 'Main Road'
+                                           or name.startswith('Village')):
+                continue
+            for a, b in zip(w['coords'], w['coords'][1:]):
+                if max(a[0], b[0]) < x0 or min(a[0], b[0]) > x1:
+                    continue
+                if max(a[1], b[1]) < y0 or min(a[1], b[1]) > y1:
+                    continue
+                if mg.point_in_ring(((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0), inner):
+                    fails.append(f"{name or 'a road'} drives through {p['name']}")
+                    break
 
 
 if __name__ == '__main__':

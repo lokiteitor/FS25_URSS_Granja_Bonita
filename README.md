@@ -42,7 +42,8 @@ the landform, two evaluators.
 | Villages | 3, strung along the main road: Verkhivka, Bereh (the crossing), Nyzhne |
 | Farms | 7: cooperativa, granos, vacas, cerdos, ovejas, invernaderos, pollos |
 | Industry | 20 square platforms of ~5 ha, eight of them sidings on the railway |
-| Fields | ~164, east-west aligned, median 18 ha, five of them near 100 ha; 54 % of the area |
+| Fields | ~170, east-west aligned, median 17 ha, five of them near 100 ha; 53 % of the area |
+| Roads | ~58 km. Every farm and industry platform is linked to the main road, and no road crosses a platform |
 | Woodland | ~13 %: gallery forest on the river, valley-side blocks, shelterbelts on the headlands |
 
 ## Running it
