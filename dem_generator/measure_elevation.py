@@ -271,8 +271,6 @@ def _shaped_mask(L, size_px, cell_m):
                          L["rail"]["grade_half_m"] + L["rail"]["blend_m"] + 60.0),
                         (L["river"]["centre"], ml.VALLEY_INFLUENCE_M)):
         reaches.append(line(poly, reach))
-    for t in L["tributaries"]:
-        reaches.append(line(t["centre"], t["influence_m"]))
     # One transform, grown to the widest reach; the narrower features are simply
     # covered more generously than they need, which for an exclusion mask is fine.
     d = ndimage.distance_transform_edt(np.array(img) == 0) * cell_m

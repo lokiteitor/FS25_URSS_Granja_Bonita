@@ -62,7 +62,7 @@ Z_MAX_CM = 62000.0                                # Giants' working ceiling, cen
 # One seed, per-purpose offsets (the `seed + 12345` idiom of generate_soil.py:84), so
 # that adding a farm cannot move the river.
 SEED = 2026
-SEED_RIVER, SEED_LAKE, SEED_PADS, SEED_TRIB = SEED + 11, SEED + 23, SEED + 37, SEED + 53
+SEED_RIVER, SEED_LAKE, SEED_PADS = SEED + 11, SEED + 23, SEED + 37
 
 # --- vertical design ---------------------------------------------------------------
 UPLAND_Z_M = 105.0            # mean height of the rolling upland
@@ -122,7 +122,6 @@ PAD_GAP_M = 20.0
 PAD_EDGE_CLEAR_M = 120.0
 PAD_RIVER_CLEAR_M = 60.0
 PAD_LAKE_CLEAR_M = 80.0
-PAD_TRIB_CLEAR_M = 80.0
 PAD_MAX_CUT_M = 4.0           # bound the earthworks directly rather than the slope:
                               # with pads up to 600 m long a 3 % slope cap would still
                               # allow 9 m of cut at the ends
@@ -162,14 +161,6 @@ INDUSTRY_DISTRICTS = [
     (7100.0, 1900.0, 8000.0, 2900.0), (900.0, 5900.0, 2100.0, 7000.0),
     (3900.0, 900.0, 5200.0, 2000.0), (5100.0, 7000.0, 6400.0, 7900.0),
 ]
-
-# --- tributaries -------------------------------------------------------------------
-TRIB_HEADS = [(1200.0, 3600.0), (2900.0, 3900.0), (4900.0, 5000.0),
-              (6400.0, 4300.0), (8000.0, 5300.0)]
-# Wider and shallower than a first guess suggests: at 3 m half-width and a 9 % side a
-# gully reads as a scratch drawn on the hillshade rather than as ground water cut.
-TRIB_HALF_M, TRIB_DEPTH_M, TRIB_SLOPE, TRIB_INFLUENCE_M = 7.0, 1.2, 0.055, 260.0
-
 
 # ====================================================================== the landform
 def river_axis_y(x, cos=math.cos):
@@ -410,39 +401,6 @@ def _find_bridges(line, which, river):
     return out
 
 
-# --- tributaries --------------------------------------------------------------------
-def _build_tributaries(river):
-    rng = random.Random(SEED_TRIB)
-    out = []
-    for hx, hy in TRIB_HEADS:
-        d, foot, _, _ = mg.project_on_polyline((hx, hy), river["centre"])
-        # Three intermediate points with alternating offsets, not one: a single mid
-        # point gives a smooth arc, and a gully that never changes its mind about
-        # which way it is going reads as a drawn line.
-        ctrl = [(hx, hy)]
-        sign = 1.0
-        for f in (0.28, 0.55, 0.8):
-            off = sign * rng.uniform(60.0, 190.0) * (1.0 - f)
-            sign = -sign
-            bx = hx + (foot[0] - hx) * f
-            by = hy + (foot[1] - hy) * f
-            nx, ny = mg._unit(-(foot[1] - hy), foot[0] - hx)
-            ctrl.append((bx + nx * off, by + ny * off))
-        ctrl.append(foot)
-        line = mg.resample(mg.catmull_rom(ctrl, per_seg=60), 25.0)
-        z_head = regional_z(hx, hy) - 1.5
-        z_foot = river_water_z(foot[0])
-        s = mg.chainage(line)
-        total = s[-1] or 1.0
-        zs = [z_head + (z_foot - z_head) * (si / total) for si in s]
-        for i in range(1, len(zs)):
-            zs[i] = min(zs[i], zs[i - 1])
-        out.append({"centre": line, "s": s, "z": zs, "half_w": TRIB_HALF_M,
-                    "depth": TRIB_DEPTH_M, "side_slope": TRIB_SLOPE,
-                    "influence_m": TRIB_INFLUENCE_M})
-    return out
-
-
 # --- platforms ----------------------------------------------------------------------
 def _site_cut(cx, cy, w, h, angle_deg):
     """Worst |z - median| of the design surface under a footprint, on a 5 x 5 grid."""
@@ -459,7 +417,7 @@ def _site_cut(cx, cy, w, h, angle_deg):
     return max(abs(zs[0] - med), abs(zs[-1] - med))
 
 
-def _pad_ok(cand, placed, river, lake, road, rail, tribs):
+def _pad_ok(cand, placed, river, lake, road, rail):
     ring, blend = cand["ring"], cand["blend_m"]
     x0, y0, x1, y1 = mg.ring_bbox(ring)
     if x0 < PAD_EDGE_CLEAR_M or y0 < PAD_EDGE_CLEAR_M:
@@ -484,10 +442,6 @@ def _pad_ok(cand, placed, river, lake, road, rail, tribs):
             for p in ring:
                 if mg.polyline_dist(p, line["centre"]) < need:
                     return tag
-    for t in tribs:
-        for p in ring:
-            if mg.polyline_dist(p, t["centre"]) < PAD_TRIB_CLEAR_M:
-                return "tributary"
     if _site_cut(cand["cx"], cand["cy"], cand["w"], cand["h"],
                  cand["angle_deg"]) > PAD_MAX_CUT_M:
         return "cut"
@@ -509,7 +463,7 @@ def _bearing_at(line, pt):
     return math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])), s_at
 
 
-def _build_pads(river, lake, road, rail, tribs):
+def _build_pads(river, lake, road, rail):
     rng = random.Random(SEED_PADS)
     pads = []
 
@@ -527,7 +481,7 @@ def _build_pads(river, lake, road, rail, tribs):
             cand = cand_fn()
             if cand is None:
                 continue
-            if _pad_ok(cand, pads, river, lake, road, rail, tribs) is None:
+            if _pad_ok(cand, pads, river, lake, road, rail) is None:
                 pads.append(cand)
                 return cand
         raise RuntimeError("could not site %s in %d tries" % (what, tries))
@@ -589,14 +543,12 @@ def _build():
                        ROAD_BLEND_M, ROAD_MAX_GRADE, ROAD_SMOOTH_M)
     rail = _build_line(RAIL_CTRL, 20.0, "Main Line", RAIL_HALF_M, RAIL_GRADE_HALF_M,
                        RAIL_BLEND_M, RAIL_MAX_GRADE, RAIL_SMOOTH_M)
-    tribs = _build_tributaries(river)
     bridges = _find_bridges(road, "road", river) + _find_bridges(rail, "rail", river)
     river["banks"] = (mg.offset_polyline(river["centre"], river["half_w"], 1),
                       mg.offset_polyline(river["centre"], river["half_w"], -1))
-    pads = _build_pads(river, lake, road, rail, tribs)
+    pads = _build_pads(river, lake, road, rail)
     return {"seed": SEED, "crossing": CROSSING_XY, "river": river, "lake": lake,
-            "road": road, "rail": rail, "bridges": bridges, "tributaries": tribs,
-            "pads": pads}
+            "road": road, "rail": rail, "bridges": bridges, "pads": pads}
 
 
 def _validate(L):

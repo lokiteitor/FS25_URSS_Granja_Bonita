@@ -7,11 +7,10 @@ Builds the 12288x12288 m canvas (1 px = 1 m) the project has always used, with t
   1. a rolling upland, tilted north-high, from fractal noise;
   2. the valley of the Bystra, carved as a rising envelope so the river always sits at
      the bottom of it, with an asymmetric bluff/slip-off pair of banks;
-  3. five tributary gullies off the upland;
-  4. the lake, a flat pool with a weir at its outlet;
-  5. graded corridors for the main road and the railway, each with its own gradient
+  3. the lake, a flat pool with a weir at its outlet;
+  4. graded corridors for the main road and the railway, each with its own gradient
      limit, floating over the river on their bridges rather than damming it;
-  6. thirty flat platforms - 3 villages, 7 farms, 20 industry pads - each blended into
+  5. thirty flat platforms - 3 villages, 7 farms, 20 industry pads - each blended into
      the ground around it instead of dropped on top of it.
 
 Every one of those comes out of `map_layout.layout()`, which the OSM generator reads as
@@ -328,20 +327,6 @@ def force_channel(terrain, d, s, riv, skip=None):
     return int(core.sum())
 
 
-def stage_tributaries(terrain, n, L):
-    """2b. Five gullies off the upland. Without them the interfluves read as a dome."""
-    for t in L["tributaries"]:
-        d, s, _ = polyline_field(t["centre"], t["s"], n, t["influence_m"])
-        zc = np.interp(s, np.asarray(t["s"], np.float32),
-                       np.asarray(t["z"], np.float32)).astype(np.float32)
-        env = (zc + t["depth"]
-               + t["side_slope"] * np.maximum(d - t["half_w"], 0.0)).astype(np.float32)
-        env = np.where(d <= t["half_w"], zc, env).astype(np.float32)
-        terrain[:] = smin(terrain, env, 2.0)
-        del d, s, zc, env
-    return len(L["tributaries"])
-
-
 def stage_lake(terrain, n, L):
     """3. The pool: flat water, a dish under it, and a shore that meets it exactly.
 
@@ -607,10 +592,6 @@ def main():
     print("2. River valley...")
     t = time.time(); river_d, river_s = stage_valley(terrain, n, L)
     print(f"   carved to {terrain.min():.1f} m   [{time.time()-t:.1f} s]")
-
-    print("2b. Tributary gullies...")
-    t = time.time(); k = stage_tributaries(terrain, n, L)
-    print(f"   {k} gully(ies)   [{time.time()-t:.1f} s]")
 
     print("3. Lake basin...")
     t = time.time(); ha = stage_lake(terrain, n, L)

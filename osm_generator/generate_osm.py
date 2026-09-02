@@ -15,6 +15,7 @@ Tag vocabulary, unchanged from the previous map so `visualize_osm.py` and
 
     landuse=farmland                                 fields
     landuse=farmyard                                 villages, farms, industry pads
+    building=industrial                              the industry pads, on top of it
     natural=wood + landuse=farmyard + leaf_type      woodland and shelterbelts
     natural=water + waterway=riverbank | water=lake  the river and the lake
     highway=primary / secondary / tertiary           road hierarchy
@@ -257,6 +258,10 @@ def stage_pads(add_way, L):
         tags = {'landuse': 'farmyard', 'name': f"{p['name']} ({p['ha']:.1f} ha)"}
         if p["kind"] == "village":
             tags['place'] = 'village'
+        elif p["kind"] == "industry":
+            # On top of landuse=farmyard, not instead of it: both checkers key off
+            # landuse and would drop the pad out of their inventories otherwise.
+            tags['building'] = 'industrial'
         add_way(p["ring"], tags)
         counts[p["kind"]] = counts.get(p["kind"], 0) + 1
     return counts
@@ -451,7 +456,7 @@ def verify(path, L, cross_id):
           f"{len(nodes)} nodes, {len(root.findall('way'))} ways")
 
     fails = []
-    counts, cross_uses = {}, set()
+    counts, cross_uses, n_industrial = {}, set(), 0
     used, read = {}, []
     bank = pc.Occupancy(cell_m=8.0)
     bank.fill_polyline(L["river"]["centre"], pc.RIVER_FLOOD_M - BANK_SLACK_M)
@@ -497,6 +502,9 @@ def verify(path, L, cross_id):
             if name.startswith('Industry Pad'):
                 if ha > ml.INDUSTRY_MAX_HA:
                     fails.append(f"{name} is {ha:.2f} ha, over the 5 ha limit")
+                if tags.get('building') != 'industrial':
+                    fails.append(f"{name} is not tagged building=industrial")
+                n_industrial += 1
                 xs = [p[0] for p in coords]; ys = [p[1] for p in coords]
                 w_m, h_m = max(xs) - min(xs), max(ys) - min(ys)
                 if abs(w_m - h_m) > 0.5:
@@ -522,11 +530,14 @@ def verify(path, L, cross_id):
     if cross_uses != {'primary', 'rail'}:
         fails.append(f"the level crossing node is used by {sorted(cross_uses)}, "
                      "not by the primary road and the railway")
+    if n_industrial != 20:
+        fails.append(f"{n_industrial} building=industrial pad(s), expected 20")
     shared = sum(1 for v in used.values() if v > 1)
     if shared < 100:
         fails.append(f"only {shared} shared node(s): the network is in pieces")
 
     print("   " + "  ".join(f"{k} {v}" for k, v in sorted(counts.items())))
+    print(f"   building=industrial {n_industrial}")
     print(f"   shared nodes (junctions) {shared}")
     for f in fails[:8]:
         print(f"   !  {f}")
