@@ -118,7 +118,7 @@ def main():
     legend = [
         Line2D([], [], color='#F97316', lw=3, label='Main road'),
         Line2D([], [], color='#FCD34D', lw=2, label='Village / link road'),
-        Line2D([], [], color='#CBD5E1', lw=1, label='Farm lane'),
+        Line2D([], [], color='#CBD5E1', lw=1, label='Village lane'),
         Line2D([], [], color='#F43F5E', lw=3, label='Bridge'),
         patches.Patch(facecolor='#A3E635', alpha=0.4, label=f"Farmland ({counts['farmland']})"),
         patches.Patch(facecolor='#15803D', alpha=0.6, label=f"Wood ({counts['wood']})"),

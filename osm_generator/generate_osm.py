@@ -7,8 +7,8 @@ Neither half re-derives the other's geometry, so the heightmap and the vectors d
 the same place by construction rather than by agreement.
 
 What this file adds on top of that skeleton is the countryside: woodland, fields, the
-link roads and farm tracks between them, and the shelterbelts along the headlands. The
-field cutter and the wood shaper live in `parcels.py`.
+link roads that reach every yard, and the shelterbelts along the headlands the fields
+leave between them. The field cutter and the wood shaper live in `parcels.py`.
 
 Tag vocabulary, unchanged from the previous map so `visualize_osm.py` and
 `check_forest_nodes.py` keep working untouched:
@@ -55,16 +55,6 @@ OUT_NAME = "map.osm"
 SEED = ml.SEED
 
 # --- link roads ---------------------------------------------------------------------
-TRACK_MIN_L_M = 320.0
-TRACK_P = 0.65                 # share of the free headland corridors a track may claim.
-                               # The rest are left for the shelterbelts: tracks and belts
-                               # want the same ground, and a track pass that takes every
-                               # corridor it can reach leaves the map with no belts at all
-TRACK_JOIN_M = 45.0            # how close a track must come to count as joined. Wider
-                               # than it looks it should be: a free run stops at the
-                               # road *corridor*, not at the road, so the nearest a
-                               # candidate can get is the corridor half-width
-STUB_MIN_M = 200.0
 NECK_MIN_M = 20.0              # least a field may pinch to between two scan lines. Under
                                # parcels.CARVE_MIN_OVERLAP_M, which is what the cutter
                                # enforces, so the Douglas-Peucker pass has room to wobble
@@ -195,17 +185,6 @@ def emit_line(add_way, line, bridges, tags, name, keep=()):
     return out
 
 
-def touches(a, b, tol=TRACK_JOIN_M):
-    """True when two polylines cross or come within tol of each other."""
-    for i in range(len(a) - 1):
-        for j in range(len(b) - 1):
-            if mg.seg_intersect(a[i], a[i + 1], b[j], b[j + 1]) is not None:
-                return True
-            if mg.seg_seg_dist(a[i], a[i + 1], b[j], b[j + 1]) <= tol:
-                return True
-    return False
-
-
 def connect_crossings(ways, get_node):
     """Give every at-grade crossing a shared node.
 
@@ -245,17 +224,6 @@ def connect_crossings(ways, get_node):
         w['node_refs'] = [get_node(x, y) for x, y in w['coords']]
         n += len(extra)
     return n
-
-
-def prune_stubs(chains, min_len):
-    """Drop dead-end chains shorter than min_len. Port of bocage:660, simplified: the
-    tracks here are straight segments, so a stub is just a short chain that touches the
-    network at one end only."""
-    keep = []
-    for c in chains:
-        if ml.polyline_length(c) >= min_len:
-            keep.append(c)
-    return keep
 
 
 # ============================================================================ stages
@@ -329,76 +297,6 @@ def village_streets(add_way, L):
             out.append(add_way(st, {'highway': 'secondary',
                                     'name': 'Village Street'}))
     return out
-
-
-def farm_tracks(add_way, get_node, rng, gaps, occ, network, river_centre):
-    """Service tracks along the headlands the fields left.
-
-    The headlands already *are* a rectilinear corridor grid, so no path search is
-    needed; what is needed is a guarantee that every track can be reached. Candidates
-    are grown outwards from the ways that already exist, one pass at a time, and
-    whatever never attaches is dropped rather than emitted as an unreachable way.
-
-    Tracks never bridge the river: a dirt track with a bridge every 300 m is not
-    credible, and each one would cost the DEM a span to hold open.
-    """
-    cand = []
-    for g in gaps:
-        if g["use"] is not None or rng.random() >= TRACK_P:
-            continue
-        h = pc.TRACK_CLEAR_M
-        if g["axis"] == "x":
-            for a, b in occ.free_band(g["at"] - h, g["at"] + h, g["a"], g["b"], tol=3.0):
-                if b - a >= TRACK_MIN_L_M:
-                    cand.append((g, [(a, g["at"]), (b, g["at"])]))
-        else:
-            for a, b in occ.free_band_v(g["at"] - h, g["at"] + h, g["a"], g["b"],
-                                        tol=3.0):
-                if b - a >= TRACK_MIN_L_M:
-                    cand.append((g, [(g["at"], a), (g["at"], b)]))
-    cand = [(g, c) for g, c in cand
-            if min(mg.polyline_dist(p, river_centre) for p in c) > 60.0]
-
-    accepted, changed = [], True
-    while changed:
-        changed = False
-        for item in list(cand):
-            g, c = item
-            reach = [w for w in network if touches(c, w['coords'])]
-            reach += [w for _, w in accepted if touches(c, w['coords'])]
-            if not reach:
-                continue
-            # Snap the loose ends onto whatever they reached, and weld the snapped point
-            # into that way. A track that stops the corridor's half-width short of the
-            # road looks joined on the render and is not joined in the file, and that is
-            # the one mistake the whole node-sharing scheme exists to avoid.
-            p0, w0 = _snap(c[0], reach)
-            p1, w1 = _snap(c[-1], reach)
-            cand.remove(item)
-            changed = True
-            if (w0 is None and w1 is None) or ml.polyline_length([p0, p1]) < STUB_MIN_M:
-                continue
-            way = add_way([p0, p1], {'highway': 'tertiary', 'name': 'Farm Track'})
-            for pt, tw in ((p0, w0), (p1, w1)):
-                if tw is not None:
-                    rd.weld(tw, pt, get_node)
-            occ.fill_polyline([p0, p1], pc.TRACK_CLEAR_M)
-            g["use"] = "track"
-            accepted.append((g, way))
-    return (len(accepted),
-            sum(ml.polyline_length(w['coords']) for _, w in accepted))
-
-
-def _snap(pt, reach):
-    """Pull an endpoint onto the nearest way it is close to -> (point, that way)."""
-    best = None
-    for w in reach:
-        d, q, _, _ = mg.project_on_polyline(pt, w['coords'])
-        if best is None or d < best[0]:
-            best = (d, q, w)
-    if best is None or best[0] > TRACK_JOIN_M * 1.5:
-        return pt, None
-    return best[1], best[2]
 
 
 # ============================================================================== main
@@ -505,24 +403,18 @@ def main():
           f"{areas[len(areas)//2]:.1f} / {areas[-1]:.1f} ha (min/median/max), "
           f"{sum(areas):.0f} ha farmed ({100*sum(areas)/played:.1f} %)")
 
-    print("8. Farm tracks along the headlands...")
-    network = road_ways + streets + [w for _, w in links]
-    n_tracks, track_km = farm_tracks(add_way, get_node, rng, gaps, occ, network,
-                                     L["river"]["centre"])
-    print(f"   {n_tracks} track(s), {track_km/1000.0:.1f} km")
-
-    print("9. Shelterbelts...")
+    print("8. Shelterbelts...")
     belts = pc.shelterbelts(gaps, occ, rng, L["rail"]["centre"])
     stage_woods(add_way, woods, belts)
     wood_ha = sum(w[1] for w in woods) + sum(b[1] for b in belts)
     print(f"   {len(belts)} belt(s), {sum(b[1] for b in belts):.0f} ha; "
           f"woodland total {wood_ha:.0f} ha ({100*wood_ha/played:.1f} %)")
 
-    print("10. Splicing shared nodes at crossings...")
+    print("9. Splicing shared nodes at crossings...")
     n_spliced = connect_crossings(ways, get_node)
     print(f"   {n_spliced} node(s) spliced")
 
-    print("11. Writing map.osm...")
+    print("10. Writing map.osm...")
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)), OUT_NAME)
     write_osm(out, ways, node_coords, node_tags)
     ok = verify(out, L, cross_id)

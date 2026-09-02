@@ -17,7 +17,8 @@ python3 visualize_osm.py       # -> map_osm_visual.png
 
 Everything structural - river, lake, road, railway, the thirty platforms - is read from
 `../map_layout.py`, which the DEM generator reads too. This half adds the countryside on
-top: woodland, fields, link roads, farm tracks and shelterbelts.
+top: woodland, fields, the link roads that reach every yard, and the shelterbelts
+on the headlands between the fields.
 
 `generate_osm.py`, `parcels.py` and `roads.py` use numpy, scipy and Pillow. The two reader scripts
 and `map_extent.py` are standard library plus matplotlib for the render.

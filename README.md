@@ -43,7 +43,7 @@ the landform, two evaluators.
 | Farms | 7: cooperativa, granos, vacas, cerdos, ovejas, invernaderos, pollos |
 | Industry | 20 square platforms of ~5 ha, eight of them sidings on the railway |
 | Fields | ~172, east-west aligned, median 17 ha, five of them near 100 ha; 53 % of the area |
-| Roads | ~58 km. Every farm and industry platform is linked to the main road, and no road crosses a platform |
+| Roads | ~37 km. Every farm and industry platform is linked to the main road, and no road crosses a platform |
 | Woodland | ~13 %: gallery forest on the river, valley-side blocks, shelterbelts on the headlands |
 
 ## Running it
