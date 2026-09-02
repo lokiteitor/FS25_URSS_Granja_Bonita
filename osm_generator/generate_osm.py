@@ -55,6 +55,9 @@ OUT_NAME = "map.osm"
 SEED = ml.SEED
 
 # --- link roads ---------------------------------------------------------------------
+BANK_SLACK_M = 15.0            # the cutter works on a 4 m raster and the ring is then
+                               # simplified at 6 m, so a field edge can end up a few
+                               # metres inside the line it was cut to
 NECK_MIN_M = 20.0              # least a field may pinch to between two scan lines. Under
                                # parcels.CARVE_MIN_OVERLAP_M, which is what the cutter
                                # enforces, so the Douglas-Peucker pass has room to wobble
@@ -337,6 +340,14 @@ def main():
     woods, thr = pc.structural_woods(L, occ, rng)
     for ring, ha in woods:
         occ.fill_ring(ring, pc.WOOD_MARGIN_M + pc.SIMPLIFY_SLACK_M)
+    # And the bank itself, whatever the traced wood edge came out as. The gallery covers
+    # it, but the outline is a 16 m raster put through chaikin and Douglas-Peucker, so it
+    # can sit tens of metres inside the true edge - and a field cut to *that* line is a
+    # field on the floodplain. The cutter trims parcels back to this instead, which is a
+    # trim and not a rejection: a strip whose southern end reaches the bank comes back
+    # shortened, still rectangular, still farmed.
+    occ.fill_polyline(L["river"]["centre"], pc.RIVER_FLOOD_M)
+    occ.fill_ring(L["lake"]["ring"], pc.RIVER_FLOOD_M)
     print(f"   {len(woods)} block(s), {sum(w[1] for w in woods):.0f} ha "
           f"(slope/grove threshold {thr:.3f}, derived)")
 
@@ -442,6 +453,9 @@ def verify(path, L, cross_id):
     fails = []
     counts, cross_uses = {}, set()
     used, read = {}, []
+    bank = pc.Occupancy(cell_m=8.0)
+    bank.fill_polyline(L["river"]["centre"], pc.RIVER_FLOOD_M - BANK_SLACK_M)
+    bank.fill_ring(L["lake"]["ring"], pc.RIVER_FLOOD_M - BANK_SLACK_M)
     for w in root.findall('way'):
         tags = {t.get('k'): t.get('v') for t in w.findall('tag')}
         refs = [int(nd.get('ref')) for nd in w.findall('nd')]
@@ -474,6 +488,8 @@ def verify(path, L, cross_id):
             if key == 'farmland' and not (pc.MIN_FIELD_HA - 0.5 <= ha
                                           <= pc.MAX_FIELD_HA + 0.5):
                 fails.append(f"{name} is {ha:.1f} ha")
+            if key == 'farmland' and on_bank(coords, bank):
+                fails.append(f"{name} reaches into the river bank")
             if key == 'farmland':
                 ov = narrowest_neck(coords)
                 if ov is not None and ov < NECK_MIN_M:
@@ -515,6 +531,21 @@ def verify(path, L, cross_id):
     if fails:
         print(f"   !  {len(fails)} check(s) failed")
     return not fails
+
+
+def on_bank(ring, bank, step=12.0):
+    """True when any of a field's boundary runs inside the floodplain raster.
+
+    Sampling the boundary is enough to catch a field wholly inside it as well: the bank
+    is connected to the outside of the map, so a parcel that never crosses its edge is
+    either entirely in it or entirely out.
+    """
+    for a, b in zip(ring, ring[1:]):
+        for k in range(max(1, int(math.dist(a, b) / step)) + 1):
+            t = k / max(1, int(math.dist(a, b) / step))
+            if bank.covered(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t):
+                return True
+    return False
 
 
 def narrowest_neck(ring, step=25.0):

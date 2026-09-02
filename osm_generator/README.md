@@ -72,6 +72,11 @@ Two rules everything else depends on:
   and emitting the smoothed one leaves the two a metre apart - close enough to look
   joined, far enough not to be. The same trap is why the level crossing is woven back in
   after the Douglas-Peucker pass, which would otherwise drop it from both lines.
+* **No field is farmed on the bank.** The floodplain is `map_layout.FLOODPLAIN_HALF_M`
+  out from the axis - the same terrace the DEM builds flat - and the gallery forest
+  covers it. Parcels are not rejected for reaching it, they are *trimmed* to it: the
+  cutter builds every field one column at a time, so a strip whose end runs into the
+  bank comes back shortened and still rectangular. The lake shore gets the same collar.
 * **Every yard reaches the main road, and no road drives through a yard.** `roads.py`
   floods a cost grid outwards from the road network - platforms, river and lake
   impassable, railway merely expensive - and attaches the farms and the industry

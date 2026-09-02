@@ -36,15 +36,15 @@ the landform, two evaluators.
 |---|---|
 | Playable area | 8192 x 8192 m, on a 12288 m canvas (2048 m of margin per side) |
 | Relief | 87-114 m over the playable area (datum 100 m); field slopes 1-3 % |
-| Water | the Bystra, ~11 km west to east, falling 90.5 -> 84.5 m, with a 43 ha lake |
+| Water | the Bystra, ~11 km west to east, falling 90.5 -> 84.5 m, with a 43 ha lake. Its bank - `FLOODPLAIN_HALF_M`, the flat terrace the DEM builds - carries no farmland: fields are trimmed back to it and the gallery forest fills it |
 | Main road | NW to SE corner to corner, gently curving, max grade 6 % |
 | Railway | NE to SW, perpendicular, max grade 1.5 %, crossing the road at the main village |
 | Villages | 3, strung along the main road: Verkhivka, Bereh (the crossing), Nyzhne |
 | Farms | 7: cooperativa, granos, vacas, cerdos, ovejas, invernaderos, pollos |
 | Industry | 20 square platforms of ~5 ha, eight of them sidings on the railway |
-| Fields | ~172, east-west aligned, median 17 ha, five of them near 100 ha; 53 % of the area |
+| Fields | ~168, east-west aligned, median 18 ha, five of them near 100 ha; 54 % of the area |
 | Roads | ~37 km. Every farm and industry platform is linked to the main road, and no road crosses a platform |
-| Woodland | ~13 %: gallery forest on the river, valley-side blocks, shelterbelts on the headlands |
+| Woodland | ~12 %: gallery forest covering the river and lake bank, valley-side blocks, shelterbelts on the headlands |
 
 ## Running it
 

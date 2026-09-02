@@ -73,7 +73,13 @@ BAND_TOL_FRAC = 0.28            # of the strip height a column may be covered an
 
 # --- clearances: what a field may not grow into ------------------------------------
 EDGE_MARGIN_M = 80.0
-RIVER_BANK_M, LAKE_BANK_M = 30.0, 35.0
+RIVER_BANK_M, LAKE_BANK_M = 30.0, 35.0     # open water margin: nothing at all here
+# The bank proper: a field is trimmed back to its edge and the gallery forest fills it.
+# The number is the DEM's own `FLOODPLAIN_HALF_M` rather than a second opinion - that is
+# how far out the heightmap builds the flat terrace the river laid down, so the ground
+# the vectors call floodplain and the ground the terrain calls floodplain are the same
+# ground. Change it there, in map_layout.py, and both halves of the pipeline follow.
+RIVER_FLOOD_M = ml.FLOODPLAIN_HALF_M
 ROAD_CLEAR_M, SECONDARY_CLEAR_M, TRACK_CLEAR_M = 16.0, 11.0, 7.0
 RAIL_CLEAR_M, PAD_CLEAR_M, WOOD_MARGIN_M = 22.0, 25.0, 12.0
 
@@ -82,14 +88,18 @@ WOOD_CELL_M = 16.0
 MIN_WOOD_HA, MIN_BELT_HA = 1.5, 0.6
 WOOD_SIMPLIFY_M = 20.0          # coarse on purpose: a dozen corners you can follow in
                                 # the editor, not a two-metre-accurate tree line
-WOOD_TARGET_FRAC = 0.135        # forest-steppe: 12-18 % wooded
+WOOD_TARGET_FRAC = 0.09     # forest-steppe: 12-18 % wooded. This is the share of the
+                            # *unclaimed* ground the slope blocks take, not the total -
+                            # the gallery forest on the bank is drawn first and carries
+                            # most of the woodland now, so the blocks ask for less
 WOOD_CLEAR_M = 12.0
 WOOD_CLOSE_M, WOOD_OPEN_M = 32.0, 24.0
 WOOD_GROVE_M = 420.0     # scale at which the valley-side band breaks into groves
 WOOD_GROVE_MIX = 0.85    # how much of the threshold is grove noise rather than slope
 RIPARIAN_INNER_M = 8.0
-RIPARIAN_W_M = (18.0, 115.0)
-RIPARIAN_MIN_W_M = 20.0
+RIPARIAN_EXTRA_M = 60.0         # how far past the bank the outer edge wanders. The band
+                                # covers the bank at every station - that is the point of
+                                # it - so all the shape has to come from the far edge
 RIPARIAN_WAVE_M = 700.0
 BELT_HALF_M = 11.0              # a 22 m shelterbelt: five to seven rows of poplar
 BELT_MIN_L_M = 400.0
@@ -383,34 +393,26 @@ def structural_woods(L, keepout, rng):
     s = riv["s"]
     total = s[-1] or 1.0
     phases = [rng.uniform(0.0, 2.0 * math.pi) for _ in range(3)]
+    # Continuous, deliberately. An earlier version broke the gallery wherever the wave
+    # ran thin, which looked right from the air and left the bank bare in the gaps - and
+    # bare bank is ground the field cutter would take. The band now reaches the bank
+    # edge at every station and only its far side wanders.
     for side in (1, -1):
-        widths = []
+        outer = []
         for si in s:
             u = 0.0
             for k, ph in enumerate(phases):
                 u += math.sin(2.0 * math.pi * si / (RIPARIAN_WAVE_M * (1 + 0.6 * k))
                               + ph + (0.0 if side > 0 else 1.7))
-            t = 0.5 + u / 6.0
-            widths.append(RIPARIAN_W_M[0] + (RIPARIAN_W_M[1] - RIPARIAN_W_M[0]) * t)
-        run = []
-        runs = []
-        for k, w in enumerate(widths):
-            if w >= RIPARIAN_MIN_W_M:
-                run.append(k)
-            elif run:
-                runs.append(run); run = []
-        if run:
-            runs.append(run)
-        for r in runs:
-            if len(r) < 6:
-                continue
-            pts = [riv["centre"][k] for k in r]
-            inner = [riv["half_w"][k] + RIPARIAN_INNER_M for k in r]
-            outer = [inner[j] + widths[k] for j, k in enumerate(r)]
-            a = mg.offset_polyline(pts, inner, side)
-            b = mg.offset_polyline(pts, outer, side)
-            ring = a + b[::-1]
-            dr.polygon([(x / cell, y / cell) for x, y in ring], fill=1)
+            outer.append(RIVER_FLOOD_M + RIPARIAN_EXTRA_M * (0.5 + u / 6.0))
+        inner = [w + RIPARIAN_INNER_M for w in riv["half_w"]]
+        a = mg.offset_polyline(riv["centre"], inner, side)
+        b = mg.offset_polyline(riv["centre"], outer, side)
+        ring = a + b[::-1]
+        dr.polygon([(x / cell, y / cell) for x, y in ring], fill=1)
+    # The lake is a widening of the same river, so its shore gets the same collar.
+    dr.polygon([(x / cell, y / cell)
+                for x, y in mg.grow_ring(L["lake"]["ring"], RIVER_FLOOD_M)], fill=1)
     riparian = np.array(img, dtype=bool)
 
     keep = ~_downsample(keepout.arr, keepout.CELL_M, cell, n)
