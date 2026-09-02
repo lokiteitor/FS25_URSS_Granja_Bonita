@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<osm version="0.6" generator="FS25 map pipeline">
+  <!--
+       Playable area: 8192 x 8192 m, centre 49.1000, 31.3000
+       (Cherkasy oblast forest-steppe - deep chernozem, the highest-yielding
+       arable belt in Ukraine).
+       Local coordinates are playable metres, x east, y south from the north
+       edge, so the centre of the map is (4096, 4096).
+       Projection: equirectangular about the centre, 111111.0 m per
+       degree of latitude and 111111.0 * cos(LAT_CENTER) m per
+       degree of longitude.
+       No features: this file carries the extent only.
+  -->
+  <bounds minlat="49.0631359631" minlon="31.2436967483" maxlat="49.1368640369" maxlon="31.3563032517"/>
+</osm>
